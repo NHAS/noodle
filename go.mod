@@ -1,4 +1,4 @@
-module noodle
+module github.com/NHAS/noodle
 
 go 1.17
 
