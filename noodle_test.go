@@ -3,6 +3,7 @@ package noodle
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"testing"
@@ -145,5 +146,57 @@ func TestJsonDecode(t *testing.T) {
 	}
 
 	fmt.Fprintf(client, "Die")
+
+}
+
+func TestLargeLong(t *testing.T) {
+	var c Config
+	c.InsecureNoAuthenticateHandshake = true
+	nc, err := Listen("127.0.0.1:3326", &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+
+		for c := range nc {
+
+			go func(conn *Connection) {
+				defer conn.Close()
+
+				for {
+
+					data := make([]byte, 1024)
+					rand.Read(data)
+
+					_, err := conn.Write(data)
+					if err != nil {
+						if err != io.EOF {
+							t.Fatal(err)
+						}
+					}
+				}
+
+			}(c)
+		}
+	}()
+
+	client, _, err := DialWithConfig("127.0.0.1:3326", &c)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+
+	data := make([]byte, 948624)
+	var fullData []byte
+	for x := 0; x < 100; x++ {
+
+		_, err := client.Read(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		fullData = append(fullData, data...)
+	}
 
 }

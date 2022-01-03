@@ -231,7 +231,7 @@ func (s *Connection) Read(b []byte) (n int, err error) {
 			return 0, err
 		}
 
-		fullMessage = append(fullMessage, buf...)
+		fullMessage = append(fullMessage, buf[:n]...)
 
 		if len(fullMessage) == int(size) {
 			break
