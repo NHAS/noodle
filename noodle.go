@@ -285,9 +285,7 @@ func (s *Connection) Write(b []byte) (n int, err error) {
 	return s.conn.Write(finalMessage)
 }
 
-func (s *Connection) Close() {
+func (s *Connection) Close() error {
 
-	s.conn.Close()
-
-	return
+	return s.conn.Close()
 }

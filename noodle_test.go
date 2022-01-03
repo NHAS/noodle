@@ -188,15 +188,12 @@ func TestLargeLong(t *testing.T) {
 	defer client.Close()
 
 	data := make([]byte, 948624)
-	var fullData []byte
 	for x := 0; x < 100; x++ {
 
 		_, err := client.Read(data)
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		fullData = append(fullData, data...)
 	}
 
 }
