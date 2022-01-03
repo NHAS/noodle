@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"testing"
 
 	"sync"
@@ -156,6 +157,7 @@ func TestLargeLong(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer close(nc)
 
 	go func() {
 
@@ -166,7 +168,7 @@ func TestLargeLong(t *testing.T) {
 
 				for {
 
-					data := make([]byte, 1024)
+					data := make([]byte, 2024)
 					rand.Read(data)
 
 					_, err := conn.Write(data)
@@ -175,6 +177,17 @@ func TestLargeLong(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
+
+					buf := make([]byte, 100)
+					n, err := conn.Read(buf)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					if string(buf[:n]) != "More" {
+						return
+					}
+
 				}
 
 			}(c)
@@ -188,12 +201,100 @@ func TestLargeLong(t *testing.T) {
 	defer client.Close()
 
 	data := make([]byte, 948624)
-	for x := 0; x < 100; x++ {
+	for x := 0; x < 1000; x++ {
 
 		_, err := client.Read(data)
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		fmt.Fprintf(client, "More")
 	}
+
+	fmt.Fprintf(client, "Die")
+
+}
+
+func BenchmarkLargeLong(b *testing.B) {
+	var c Config
+	c.InsecureNoAuthenticateHandshake = true
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer l.Close()
+
+	newConnections := make(chan *Connection)
+
+	go func() {
+		defer close(newConnections)
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+
+			s, _, err := Wrap(conn, &c)
+			if err != nil {
+				continue
+			}
+			newConnections <- s
+		}
+	}()
+
+	go func() {
+
+		for c := range newConnections {
+
+			go func(conn *Connection) {
+				defer conn.Close()
+
+				for {
+
+					data := make([]byte, 2024)
+					rand.Read(data)
+
+					_, err := conn.Write(data)
+					if err != nil {
+						if err != io.EOF {
+							b.Fatal(err)
+						}
+					}
+
+					buf := make([]byte, 100)
+					n, err := conn.Read(buf)
+					if err != nil {
+						b.Fatal(err)
+					}
+
+					if string(buf[:n]) != "More" {
+						return
+					}
+
+				}
+
+			}(c)
+		}
+	}()
+
+	client, _, err := DialWithConfig(l.Addr().String(), &c)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+
+	data := make([]byte, 948624)
+	for x := 0; x < b.N; x++ {
+
+		_, err := client.Read(data)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		fmt.Fprintf(client, "More")
+	}
+
+	fmt.Fprintf(client, "Die")
 
 }

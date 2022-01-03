@@ -184,6 +184,7 @@ func Listen(addr string, config *Config) (newConnections chan *Connection, err e
 	newConnections = make(chan *Connection)
 
 	go func() {
+
 		defer close(newConnections)
 		for {
 			conn, err := l.Accept()
@@ -203,15 +204,16 @@ func Listen(addr string, config *Config) (newConnections chan *Connection, err e
 }
 
 func (s *Connection) Read(b []byte) (n int, err error) {
-	s.Lock()
-	defer s.Unlock()
 
+	s.Lock()
 	if len(s.readBuffer) > 0 {
 		n := copy(b, s.readBuffer)
 
 		s.readBuffer = s.readBuffer[n:]
+		s.Unlock()
 		return n, nil
 	}
+	s.Unlock()
 
 	sizeBuf := make([]byte, 2)
 	_, err = io.ReadFull(s.conn, sizeBuf)
@@ -221,17 +223,17 @@ func (s *Connection) Read(b []byte) (n int, err error) {
 
 	size := binary.BigEndian.Uint16(sizeBuf)
 
-	fullMessage := make([]byte, 0, size)
+	end := 0
+	fullMessage := make([]byte, size)
 
 	for {
 
-		buf := make([]byte, size)
-		n, err = s.conn.Read(buf)
+		n, err = s.conn.Read(fullMessage[end:])
 		if err != nil {
 			return 0, err
 		}
 
-		fullMessage = append(fullMessage, buf[:n]...)
+		end = n
 
 		if len(fullMessage) == int(size) {
 			break
@@ -254,7 +256,9 @@ func (s *Connection) Read(b []byte) (n int, err error) {
 
 	n = copy(b, plaintext)
 	if n < len(plaintext) {
+		s.Lock()
 		s.readBuffer = append(s.readBuffer, plaintext[n:]...)
+		s.Unlock()
 	}
 
 	return n, nil
