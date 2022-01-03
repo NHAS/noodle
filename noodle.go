@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/NHAS/chacha20blake2s"
@@ -22,6 +24,9 @@ type Connection struct {
 	rCounter, wCounter uint64
 	staticPriv         ed25519.PrivateKey
 	staticPublic       crypto.PublicKey
+
+	sync.Mutex
+	readBuffer []byte
 
 	enc *chacha20blake2s.Chacha20blake2s
 }
@@ -198,15 +203,42 @@ func Listen(addr string, config *Config) (newConnections chan *Connection, err e
 }
 
 func (s *Connection) Read(b []byte) (n int, err error) {
+	s.Lock()
+	defer s.Unlock()
 
-	buf := make([]byte, len(b)+s.enc.Overhead()+8)
+	if len(s.readBuffer) > 0 {
+		n := copy(b, s.readBuffer)
 
-	n, err = s.conn.Read(buf)
+		s.readBuffer = s.readBuffer[n:]
+		return n, nil
+	}
+
+	sizeBuf := make([]byte, 2)
+	_, err = io.ReadFull(s.conn, sizeBuf)
 	if err != nil {
 		return 0, err
 	}
 
-	plaintext, err := s.enc.Open(buf[:n])
+	size := binary.BigEndian.Uint16(sizeBuf)
+
+	fullMessage := make([]byte, 0, size)
+
+	for {
+
+		buf := make([]byte, size)
+		n, err = s.conn.Read(buf)
+		if err != nil {
+			return 0, err
+		}
+
+		fullMessage = append(fullMessage, buf...)
+
+		if len(fullMessage) == int(size) {
+			break
+		}
+	}
+
+	plaintext, err := s.enc.Open(fullMessage)
 	if err != nil {
 		return 0, err
 	}
@@ -218,10 +250,21 @@ func (s *Connection) Read(b []byte) (n int, err error) {
 
 	s.rCounter++
 
-	return copy(b, plaintext[8:]), nil
+	plaintext = plaintext[8:]
+
+	n = copy(b, plaintext)
+	if n < len(plaintext) {
+		s.readBuffer = append(s.readBuffer, plaintext[n:]...)
+	}
+
+	return n, nil
 }
 
 func (s *Connection) Write(b []byte) (n int, err error) {
+
+	if len(b) > 65535-s.enc.Overhead()-8 {
+		return 0, fmt.Errorf("payload too big to send %d max %d", len(b), 65535-s.enc.Overhead()-8)
+	}
 
 	cnt := make([]byte, 8, 8+len(b))
 	binary.BigEndian.PutUint64(cnt, s.wCounter)
@@ -232,9 +275,14 @@ func (s *Connection) Write(b []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
-
 	s.wCounter++
-	return s.conn.Write(ciphertext)
+
+	finalMessage := make([]byte, 2, len(ciphertext)+2)
+	binary.BigEndian.PutUint16(finalMessage, uint16(len(ciphertext)))
+
+	finalMessage = append(finalMessage, ciphertext...)
+
+	return s.conn.Write(finalMessage)
 }
 
 func (s *Connection) Close() {

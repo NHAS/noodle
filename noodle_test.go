@@ -1,6 +1,7 @@
 package noodle
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -9,7 +10,7 @@ import (
 	"sync"
 )
 
-func TestFull(t *testing.T) {
+func TestRandom(t *testing.T) {
 	var c Config
 	c.InsecureNoAuthenticateHandshake = true
 	nc, err := Listen("127.0.0.1:3322", &c)
@@ -69,10 +70,80 @@ func TestFull(t *testing.T) {
 				}
 
 			}
-
-			fmt.Println("Ended ", no)
 		}(x)
 	}
 
 	wg.Wait()
+}
+
+type TestConfig struct {
+	Test  string
+	Toast string
+	Size  int
+}
+
+func TestJsonDecode(t *testing.T) {
+	var c Config
+	c.InsecureNoAuthenticateHandshake = true
+	nc, err := Listen("127.0.0.1:3323", &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+
+		for c := range nc {
+
+			go func(conn *Connection) {
+				defer conn.Close()
+
+				tc := TestConfig{
+					Test:  "test",
+					Toast: "Noot",
+					Size:  123,
+				}
+				b, _ := json.Marshal(&tc)
+
+				for {
+					_, err := conn.Write(b)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					buf := make([]byte, 100)
+					n, err := conn.Read(buf)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					if string(buf[:n]) != "Live" {
+						return
+					}
+
+				}
+
+			}(c)
+		}
+	}()
+
+	client, _, err := DialWithConfig("127.0.0.1:3323", &c)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+
+	dc := json.NewDecoder(client)
+
+	for x := 0; x < 100; x++ {
+		var conf TestConfig
+		err = dc.Decode(&conf)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		fmt.Fprintf(client, "Live")
+	}
+
+	fmt.Fprintf(client, "Die")
+
 }
