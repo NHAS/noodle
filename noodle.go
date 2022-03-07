@@ -28,7 +28,7 @@ type Connection struct {
 	sync.Mutex
 	readBuffer []byte
 
-	enc *chacha20blake2s.Chacha20blake2s
+	out *chacha20blake2s.Chacha20blake2s
 }
 
 type Config struct {
@@ -108,7 +108,7 @@ func (s *Connection) handshake(conf *Config) error {
 
 	s.sessKey = key[:]
 
-	s.enc, err = chacha20blake2s.New(s.sessKey)
+	s.out, err = chacha20blake2s.New(s.sessKey)
 	if err != nil {
 		return err
 	}
@@ -240,7 +240,7 @@ func (s *Connection) Read(b []byte) (n int, err error) {
 		}
 	}
 
-	plaintext, err := s.enc.Open(fullMessage)
+	plaintext, err := s.out.Open(fullMessage)
 	if err != nil {
 		return 0, err
 	}
@@ -266,8 +266,8 @@ func (s *Connection) Read(b []byte) (n int, err error) {
 
 func (s *Connection) Write(b []byte) (n int, err error) {
 
-	if len(b) > 65535-s.enc.Overhead()-8 {
-		return 0, fmt.Errorf("payload too big to send %d max %d", len(b), 65535-s.enc.Overhead()-8)
+	if len(b) > 65535-s.out.Overhead()-8 {
+		return 0, fmt.Errorf("payload too big to send %d max %d", len(b), 65535-s.out.Overhead()-8)
 	}
 
 	cnt := make([]byte, 8, 8+len(b))
@@ -275,7 +275,10 @@ func (s *Connection) Write(b []byte) (n int, err error) {
 
 	cnt = append(cnt, b...)
 
-	ciphertext, err := s.enc.Seal(cnt)
+	s.Lock()
+	defer s.Unlock()
+
+	ciphertext, err := s.out.Seal(cnt)
 	if err != nil {
 		return 0, err
 	}
@@ -290,6 +293,8 @@ func (s *Connection) Write(b []byte) (n int, err error) {
 }
 
 func (s *Connection) Close() error {
+	s.Lock()
+	defer s.Unlock()
 
 	return s.conn.Close()
 }
